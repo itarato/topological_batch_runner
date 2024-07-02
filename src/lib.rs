@@ -1,12 +1,12 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
     thread,
     time::Duration,
 };
 
 #[derive(Debug)]
-struct TopologicalBatchProvider {
+pub struct TopologicalBatchProvider {
     unavailable: HashSet<usize>,
     rights: Vec<usize>,
     available: HashSet<usize>,
@@ -14,7 +14,7 @@ struct TopologicalBatchProvider {
 }
 
 impl TopologicalBatchProvider {
-    fn new(dependency: HashMap<usize, Vec<usize>>) -> Self {
+    pub fn new(dependency: HashMap<usize, Vec<usize>>) -> Self {
         let mut inverse_dependency: HashMap<usize, Vec<usize>> = HashMap::new();
         let mut rights = vec![];
         let mut unavailable = HashSet::new();
@@ -45,11 +45,11 @@ impl TopologicalBatchProvider {
         }
     }
 
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.available.is_empty() && self.unavailable.is_empty()
     }
 
-    fn complete(&mut self, node: usize) {
+    pub fn complete(&mut self, node: usize) {
         if self.inverse_dependency.contains_key(&node) {
             for rev_dep_node in self.inverse_dependency.get_mut(&node).unwrap().drain(0..) {
                 let i = self.rights.iter().position(|e| e == &rev_dep_node).unwrap();
@@ -66,7 +66,7 @@ impl TopologicalBatchProvider {
         self.unavailable.remove(&node);
     }
 
-    fn pop(&mut self) -> Option<usize> {
+    pub fn pop(&mut self) -> Option<usize> {
         if let Some(popped) = self.available.iter().next().copied() {
             self.available.take(&popped)
         } else {
@@ -75,16 +75,16 @@ impl TopologicalBatchProvider {
     }
 }
 
-struct ThreadPoolRunner {
+pub struct ThreadPoolRunner {
     thread_count: usize,
 }
 
 impl ThreadPoolRunner {
-    fn new(thread_count: usize) -> Self {
+    pub fn new(thread_count: usize) -> Self {
         Self { thread_count }
     }
 
-    fn run(&self, topological_batch_provider: TopologicalBatchProvider) {
+    pub fn run(&self, topological_batch_provider: TopologicalBatchProvider) {
         let provider = Arc::new(Mutex::new(topological_batch_provider));
         let mut handles = vec![];
 
@@ -126,45 +126,40 @@ impl ThreadPoolRunner {
     }
 }
 
-fn main() {
-    let mut nodes: HashMap<usize, Vec<usize>> = HashMap::new();
-
-    nodes.insert(1, vec![]);
-    nodes.insert(2, vec![1]);
-    nodes.insert(3, vec![1]);
-    nodes.insert(4, vec![]);
-    nodes.insert(5, vec![]);
-    nodes.insert(6, vec![2, 3]);
-    nodes.insert(7, vec![3, 4]);
-    nodes.insert(8, vec![6]);
-
-    let topological_batch_provider = TopologicalBatchProvider::new(nodes);
-    dbg!(&topological_batch_provider);
-
-    // while !topological_batch_provider.is_empty() {
-    //     let mut batch = vec![];
-    //     while let Some(node) = topological_batch_provider.pop() {
-    //         batch.push(node);
-    //     }
-
-    //     dbg!(&batch);
-
-    //     for node in batch {
-    //         topological_batch_provider.complete(node);
-    //     }
-    // }
-
-    let runner = ThreadPoolRunner::new(4);
-    runner.run(topological_batch_provider);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+        let mut nodes: HashMap<usize, Vec<usize>> = HashMap::new();
+
+        nodes.insert(1, vec![]);
+        nodes.insert(2, vec![1]);
+        nodes.insert(3, vec![1]);
+        nodes.insert(4, vec![]);
+        nodes.insert(5, vec![]);
+        nodes.insert(6, vec![2, 3]);
+        nodes.insert(7, vec![3, 4]);
+        nodes.insert(8, vec![6]);
+
+        let topological_batch_provider = TopologicalBatchProvider::new(nodes);
+        dbg!(&topological_batch_provider);
+
+        // while !topological_batch_provider.is_empty() {
+        //     let mut batch = vec![];
+        //     while let Some(node) = topological_batch_provider.pop() {
+        //         batch.push(node);
+        //     }
+
+        //     dbg!(&batch);
+
+        //     for node in batch {
+        //         topological_batch_provider.complete(node);
+        //     }
+        // }
+
+        let runner = ThreadPoolRunner::new(4);
+        runner.run(topological_batch_provider);
     }
 }
