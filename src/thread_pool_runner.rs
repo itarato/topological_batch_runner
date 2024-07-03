@@ -68,21 +68,6 @@ mod tests {
 
     use super::*;
 
-    struct NodeExample {
-        id: String,
-        dependencies: Vec<String>,
-    }
-
-    impl Node<String> for NodeExample {
-        fn id<'a>(&'a self) -> &'a String {
-            &self.id
-        }
-
-        fn dependencies(&self) -> &Vec<String> {
-            &self.dependencies
-        }
-    }
-
     struct ExecutorExample {
         dependency_graph: HashMap<usize, Vec<usize>>,
         seen: Arc<Mutex<HashSet<usize>>>,

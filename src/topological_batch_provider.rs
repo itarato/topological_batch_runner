@@ -1,3 +1,6 @@
+//! The topological batch provider can be used independently from the runner. It has added circular dependency
+//! detection.
+
 use super::common::*;
 use std::{
     collections::{HashMap, HashSet},
@@ -13,6 +16,19 @@ pub struct TopologicalBatchProvider<T> {
 }
 
 impl<T: Hash + PartialEq + Eq + Clone> TopologicalBatchProvider<T> {
+    /// The dependency list is expected as a map. All node must declare their dependecy, even when there is none.
+    /// For example the following structure:
+    ///
+    /// ```text
+    /// {
+    ///     0 => [1],
+    ///     1 => [],
+    /// }
+    /// ```
+    ///
+    /// Says: 0 depends on 1 (1 must come before 0) and 1 has no dependency.
+    ///
+    /// It returns an error when circular dependency is detected.
     pub fn new(nodes: HashMap<T, Vec<T>>) -> Result<Self, Error> {
         if Self::has_cycle(&nodes) {
             return Err("Cycle detected.".into());
@@ -75,10 +91,14 @@ impl<T: Hash + PartialEq + Eq + Clone> TopologicalBatchProvider<T> {
         false
     }
 
+    /// Empty is a global check over the batch provider, when it has no more ID to provide and all of the retrieved
+    /// IDs were marked as computed.
     pub fn is_empty(&self) -> bool {
         self.available.is_empty() && self.unavailable.is_empty()
     }
 
+    /// Complete is the signal the resolution of the dependency - all of it's dependees are now free of this dependency.
+    /// When all dependencies of a dependee are `complete`ed, the dependee is ready to be used.
     pub fn complete(&mut self, node: T) {
         if self.inverse_dependency.contains_key(&node) {
             for rev_dep_node in self.inverse_dependency.get_mut(&node).unwrap().drain(0..) {
@@ -96,6 +116,9 @@ impl<T: Hash + PartialEq + Eq + Clone> TopologicalBatchProvider<T> {
         self.unavailable.remove(&node);
     }
 
+    /// Get an available ID to be computed. It picks one random from the available batch.
+    /// Getting a `None` only means that there is no more available in the current batch. Signaling `complete` on the
+    /// actively computed IDs might yield new available items.
     pub fn pop(&mut self) -> Option<T> {
         if let Some(popped) = self.available.iter().next().cloned() {
             self.available.take(&popped)
