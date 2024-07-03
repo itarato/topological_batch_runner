@@ -131,4 +131,38 @@ mod tests {
 
         assert!(TopologicalBatchProvider::new(nodes).is_err());
     }
+
+    #[test]
+    fn it_provides_batches() {
+        let mut nodes: HashMap<usize, Vec<usize>> = HashMap::new();
+
+        nodes.insert(1, vec![]);
+        nodes.insert(2, vec![1]);
+        nodes.insert(3, vec![1]);
+        nodes.insert(4, vec![]);
+        nodes.insert(5, vec![]);
+        nodes.insert(6, vec![2, 3]);
+        nodes.insert(7, vec![3, 4]);
+        nodes.insert(8, vec![6]);
+
+        let mut topological_batch_provider = TopologicalBatchProvider::new(nodes.clone()).unwrap();
+
+        let expected: Vec<Vec<usize>> = vec![vec![1, 4, 5], vec![2, 3], vec![6, 7], vec![8]];
+        for i in 0..4 {
+            let mut actual = HashSet::new();
+            while let Some(v) = topological_batch_provider.pop() {
+                actual.insert(v);
+            }
+
+            assert_eq!(
+                HashSet::from_iter(expected.get(i).unwrap().into_iter().cloned()),
+                actual
+            );
+            for v in actual {
+                topological_batch_provider.complete(v);
+            }
+        }
+
+        assert!(topological_batch_provider.is_empty());
+    }
 }
