@@ -1,41 +1,47 @@
 use std::{
     collections::{HashMap, HashSet},
+    hash::Hash,
     sync::{Arc, Mutex},
     thread,
     time::Duration,
 };
 
-#[derive(Debug)]
-pub struct TopologicalBatchProvider {
-    unavailable: HashSet<usize>,
-    rights: Vec<usize>,
-    available: HashSet<usize>,
-    inverse_dependency: HashMap<usize, Vec<usize>>,
+trait Node<T: Clone + Hash + PartialEq + Eq> {
+    fn id(&self) -> &T;
+    fn dependencies(&self) -> &Vec<T>;
 }
 
-impl TopologicalBatchProvider {
-    pub fn new(dependency: HashMap<usize, Vec<usize>>) -> Self {
-        let mut inverse_dependency: HashMap<usize, Vec<usize>> = HashMap::new();
+#[derive(Debug)]
+pub struct TopologicalBatchProvider<T> {
+    unavailable: HashSet<T>,
+    rights: Vec<T>,
+    available: HashSet<T>,
+    inverse_dependency: HashMap<T, Vec<T>>,
+}
+
+impl<T: Hash + PartialEq + Eq + Clone> TopologicalBatchProvider<T> {
+    pub fn new(nodes: HashMap<T, Vec<T>>) -> Self {
+        let mut inverse_dependency: HashMap<T, Vec<T>> = HashMap::new();
         let mut rights = vec![];
         let mut unavailable = HashSet::new();
 
-        for (dependee, dependencies) in &dependency {
-            unavailable.insert(*dependee);
+        for (dependee, dependencies) in &nodes {
+            unavailable.insert(dependee.clone());
 
             for dependency in dependencies {
                 inverse_dependency
-                    .entry(*dependency)
+                    .entry(dependency.clone())
                     .or_default()
-                    .push(*dependee);
+                    .push(dependee.clone());
 
-                rights.push(*dependee);
+                rights.push(dependee.clone());
             }
         }
 
         let available = unavailable
-            .difference(&HashSet::from_iter(rights.iter().copied()))
-            .copied()
-            .collect::<HashSet<usize>>();
+            .difference(&HashSet::from_iter(rights.iter().cloned()))
+            .cloned()
+            .collect::<HashSet<T>>();
 
         Self {
             unavailable,
@@ -49,7 +55,7 @@ impl TopologicalBatchProvider {
         self.available.is_empty() && self.unavailable.is_empty()
     }
 
-    pub fn complete(&mut self, node: usize) {
+    pub fn complete(&mut self, node: T) {
         if self.inverse_dependency.contains_key(&node) {
             for rev_dep_node in self.inverse_dependency.get_mut(&node).unwrap().drain(0..) {
                 let i = self.rights.iter().position(|e| e == &rev_dep_node).unwrap();
@@ -66,13 +72,17 @@ impl TopologicalBatchProvider {
         self.unavailable.remove(&node);
     }
 
-    pub fn pop(&mut self) -> Option<usize> {
-        if let Some(popped) = self.available.iter().next().copied() {
+    pub fn pop(&mut self) -> Option<T> {
+        if let Some(popped) = self.available.iter().next().cloned() {
             self.available.take(&popped)
         } else {
             None
         }
     }
+}
+
+pub trait CallableByID<T> {
+    fn call(&self, id: T);
 }
 
 pub struct ThreadPoolRunner {
@@ -84,13 +94,18 @@ impl ThreadPoolRunner {
         Self { thread_count }
     }
 
-    pub fn run(&self, topological_batch_provider: TopologicalBatchProvider) {
+    pub fn run<T: Hash + PartialEq + Eq + Clone + Send + 'static>(
+        &self,
+        topological_batch_provider: TopologicalBatchProvider<T>,
+        node_executor: Arc<dyn CallableByID<T> + Send + Sync>,
+    ) {
         let provider = Arc::new(Mutex::new(topological_batch_provider));
         let mut handles = vec![];
 
         for _ in 0..self.thread_count {
             let handle = thread::spawn({
                 let provider = provider.clone();
+                let node_executor = node_executor.clone();
 
                 move || loop {
                     let node;
@@ -104,9 +119,7 @@ impl ThreadPoolRunner {
                     }
 
                     if let Some(node) = node {
-                        println!("Start working on node {}", node);
-                        thread::sleep(Duration::from_secs(1));
-                        println!("Finish working on node {}", node);
+                        node_executor.call(node.clone());
 
                         {
                             let mut provider_lock = provider.lock().unwrap();
@@ -130,8 +143,50 @@ impl ThreadPoolRunner {
 mod tests {
     use super::*;
 
+    struct NodeExample {
+        id: String,
+        dependencies: Vec<String>,
+    }
+
+    impl Node<String> for NodeExample {
+        fn id<'a>(&'a self) -> &'a String {
+            &self.id
+        }
+
+        fn dependencies(&self) -> &Vec<String> {
+            &self.dependencies
+        }
+    }
+
+    struct ExecutorExample {
+        dependency_graph: HashMap<usize, Vec<usize>>,
+        seen: Arc<Mutex<HashSet<usize>>>,
+    }
+
+    impl ExecutorExample {
+        fn new(dependency_graph: HashMap<usize, Vec<usize>>) -> Self {
+            Self {
+                dependency_graph,
+                seen: Arc::new(Mutex::new(HashSet::new())),
+            }
+        }
+    }
+
+    impl CallableByID<usize> for ExecutorExample {
+        fn call(&self, id: usize) {
+            thread::sleep(Duration::from_micros(100));
+
+            let mut seen = self.seen.lock().unwrap();
+            seen.insert(id);
+
+            for dep in &self.dependency_graph[&id] {
+                assert!(seen.contains(&dep));
+            }
+        }
+    }
+
     #[test]
-    fn it_works() {
+    fn it_works_with_single_thread() {
         let mut nodes: HashMap<usize, Vec<usize>> = HashMap::new();
 
         nodes.insert(1, vec![]);
@@ -143,23 +198,30 @@ mod tests {
         nodes.insert(7, vec![3, 4]);
         nodes.insert(8, vec![6]);
 
-        let topological_batch_provider = TopologicalBatchProvider::new(nodes);
-        dbg!(&topological_batch_provider);
+        let topological_batch_provider = TopologicalBatchProvider::new(nodes.clone());
+        let runner = ThreadPoolRunner::new(1);
+        let executor = Arc::new(ExecutorExample::new(nodes));
 
-        // while !topological_batch_provider.is_empty() {
-        //     let mut batch = vec![];
-        //     while let Some(node) = topological_batch_provider.pop() {
-        //         batch.push(node);
-        //     }
+        runner.run(topological_batch_provider, executor);
+    }
 
-        //     dbg!(&batch);
+    #[test]
+    fn it_works_with_multiple_threads() {
+        let mut nodes: HashMap<usize, Vec<usize>> = HashMap::new();
 
-        //     for node in batch {
-        //         topological_batch_provider.complete(node);
-        //     }
-        // }
+        nodes.insert(1, vec![]);
+        nodes.insert(2, vec![1]);
+        nodes.insert(3, vec![1]);
+        nodes.insert(4, vec![]);
+        nodes.insert(5, vec![]);
+        nodes.insert(6, vec![2, 3]);
+        nodes.insert(7, vec![3, 4]);
+        nodes.insert(8, vec![6]);
 
+        let topological_batch_provider = TopologicalBatchProvider::new(nodes.clone());
         let runner = ThreadPoolRunner::new(4);
-        runner.run(topological_batch_provider);
+        let executor = Arc::new(ExecutorExample::new(nodes));
+
+        runner.run(topological_batch_provider, executor);
     }
 }
