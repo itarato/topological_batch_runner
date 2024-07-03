@@ -6,6 +6,8 @@ use std::{
     time::Duration,
 };
 
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+
 trait Node<T: Clone + Hash + PartialEq + Eq> {
     fn id(&self) -> &T;
     fn dependencies(&self) -> &Vec<T>;
@@ -20,7 +22,11 @@ pub struct TopologicalBatchProvider<T> {
 }
 
 impl<T: Hash + PartialEq + Eq + Clone> TopologicalBatchProvider<T> {
-    pub fn new(nodes: HashMap<T, Vec<T>>) -> Self {
+    pub fn new(nodes: HashMap<T, Vec<T>>) -> Result<Self, Error> {
+        if Self::has_cycle(&nodes) {
+            return Err("Cycle detected.".into());
+        }
+
         let mut inverse_dependency: HashMap<T, Vec<T>> = HashMap::new();
         let mut rights = vec![];
         let mut unavailable = HashSet::new();
@@ -43,12 +49,39 @@ impl<T: Hash + PartialEq + Eq + Clone> TopologicalBatchProvider<T> {
             .cloned()
             .collect::<HashSet<T>>();
 
-        Self {
+        Ok(Self {
             unavailable,
             rights,
             available,
             inverse_dependency,
+        })
+    }
+
+    fn has_cycle(nodes: &HashMap<T, Vec<T>>) -> bool {
+        let mut done: HashMap<T, HashSet<T>> = HashMap::new();
+
+        for (n, req) in nodes {
+            let mut stack = req.clone();
+            done.insert(n.clone(), HashSet::new());
+
+            while let Some(m) = stack.pop() {
+                if done[n].contains(&m) {
+                    continue;
+                }
+
+                if &m == n {
+                    return true;
+                }
+
+                for dep_m in &nodes[&m] {
+                    stack.push(dep_m.clone());
+                }
+
+                done.get_mut(n).unwrap().insert(m);
+            }
         }
+
+        false
     }
 
     pub fn is_empty(&self) -> bool {
@@ -186,6 +219,29 @@ mod tests {
     }
 
     #[test]
+    fn it_detects_cycles() {
+        let mut nodes: HashMap<usize, Vec<usize>> = HashMap::new();
+
+        nodes.insert(1, vec![3, 4]);
+        nodes.insert(2, vec![1]);
+        nodes.insert(3, vec![2]);
+        nodes.insert(4, vec![]);
+
+        assert!(TopologicalBatchProvider::new(nodes).is_err());
+    }
+
+    #[test]
+    fn it_detects_cycles_not_at_the_beginning() {
+        let mut nodes: HashMap<usize, Vec<usize>> = HashMap::new();
+
+        nodes.insert(1, vec![3]);
+        nodes.insert(2, vec![3]);
+        nodes.insert(3, vec![2]);
+
+        assert!(TopologicalBatchProvider::new(nodes).is_err());
+    }
+
+    #[test]
     fn it_works_with_single_thread() {
         let mut nodes: HashMap<usize, Vec<usize>> = HashMap::new();
 
@@ -202,7 +258,7 @@ mod tests {
         let runner = ThreadPoolRunner::new(1);
         let executor = Arc::new(ExecutorExample::new(nodes));
 
-        runner.run(topological_batch_provider, executor);
+        runner.run(topological_batch_provider.unwrap(), executor);
     }
 
     #[test]
@@ -222,6 +278,6 @@ mod tests {
         let runner = ThreadPoolRunner::new(4);
         let executor = Arc::new(ExecutorExample::new(nodes));
 
-        runner.run(topological_batch_provider, executor);
+        runner.run(topological_batch_provider.unwrap(), executor);
     }
 }
