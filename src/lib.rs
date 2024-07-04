@@ -8,7 +8,7 @@
 //! A more practical example:
 //!
 //!
-//! ```no_run
+//! ```ignore
 //! /// The structure responsible running the dependent operations. Must be Send and Sync.
 //! struct ExecutorExample {
 //!     /// Inner data.

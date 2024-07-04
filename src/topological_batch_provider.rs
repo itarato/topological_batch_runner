@@ -65,26 +65,30 @@ impl<T: Hash + PartialEq + Eq + Clone> TopologicalBatchProvider<T> {
     }
 
     fn has_cycle(nodes: &HashMap<T, Vec<T>>) -> bool {
-        let mut done: HashMap<T, HashSet<T>> = HashMap::new();
+        let mut done: HashMap<&T, HashSet<&T>> = HashMap::new();
 
-        for (n, req) in nodes {
-            let mut stack = req.clone();
-            done.insert(n.clone(), HashSet::new());
+        for (n, reqs) in nodes {
+            let mut stack = vec![];
+            for req in reqs {
+                stack.push(req);
+            }
+
+            done.insert(n, HashSet::new());
 
             while let Some(m) = stack.pop() {
                 if done[n].contains(&m) {
                     continue;
                 }
 
-                if &m == n {
+                if m == n {
                     return true;
                 }
 
                 for dep_m in &nodes[&m] {
-                    stack.push(dep_m.clone());
+                    stack.push(dep_m);
                 }
 
-                done.get_mut(n).unwrap().insert(m);
+                done.get_mut(n).unwrap().insert(&m);
             }
         }
 
