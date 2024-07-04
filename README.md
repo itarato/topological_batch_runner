@@ -1,7 +1,11 @@
 # Parallel Topological Batch Runner
 
 Topological batch runner is a tiny library that allows efficient parallel execution of topologically ordered operations.
-Simple topological ordering provides a linear list, which is not trivial to parallelize. See the following example.
+Simple topological ordering provides a linear list, which is not trivial to parallelize.
+
+![Idea](./misc/idea.png)
+
+See the following example.
 
 We have 3 operations, A, B and C, where B and C depends on A (meaning A needs to come first, then B or C in arbitrary
 order). A linear execution order would be A then B then C or A then C then B. However once A is computed, B and C can
